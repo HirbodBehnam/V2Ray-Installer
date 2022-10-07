@@ -115,6 +115,7 @@ function print_inbound {
 	echo "Currently configured inbounds:"
 	local inbounds
 	inbounds=$(jq -c .inbounds[] /usr/local/etc/v2ray/config.json)
+	local i=1
 	# Loop over all inbounds
 	while read -r inbound; do
 		local line
@@ -132,7 +133,8 @@ function print_inbound {
 		line+=$(jq -r '"Listening on " + .listen + ":" + (.port | tostring)' <<< "$inbound")
 		line+=")"
 		# Done
-		echo "$line"
+		echo "$i) $line"
+		i=$((i+1))
 	done <<< "$inbounds"
 	echo
 }
@@ -321,10 +323,29 @@ function add_inbound_rule {
 		if [[ $distro =~ "Ubuntu" ]]; then
 			ufw allow "$port"/tcp
 		elif [[ $distro =~ "Debian" ]]; then
+			iptables -A INPUT -p tcp --dport "$port" --jump ACCEPT
+			iptables-save >/etc/iptables/rules.v4
+		fi
+	fi
+}
+
+# Removes one inbound rule from configs
+function remove_inbound_rule {
+	local option port
+	read -r -p "Select an inbound rule to remove by it's index: " -e option
+	# Remove the firewall rule
+	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port')
+	if [[ "$port" != "null" ]]; then
+		if [[ $distro =~ "Ubuntu" ]]; then
+			ufw delete allow "$port"/tcp
+		elif [[ $distro =~ "Debian" ]]; then
 			iptables -D INPUT -p tcp --dport "$port" --jump ACCEPT
 			iptables-save >/etc/iptables/rules.v4
 		fi
 	fi
+	# Change the config
+	jq -c --arg index "$option" 'del(.inbounds[$index | tonumber - 1])' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
+	systemctl restart v2ray
 }
 
 # Shows a menu to edit user
@@ -343,7 +364,7 @@ function main_menu {
 	case $option in
 	1) add_inbound_rule ;;
 	2) ;;
-	3) ;;
+	3) remove_inbound_rule ;;
 	4) uninstall_v2fly ;;
 	esac
 }
