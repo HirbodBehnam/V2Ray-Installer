@@ -55,7 +55,18 @@ function install_v2fly {
 
 # Uninstalls v2ray and service
 function uninstall_v2fly {
-	# TODO: handle firewall
+	# Remove firewall rules
+	local to_remove_ports
+	to_remove_ports=$(jq '.inbounds[] | select(.listen != "127.0.0.1") | .port' /usr/local/etc/v2ray/config.json)
+	while read -r port; do
+		if [[ $distro =~ "Ubuntu" ]]; then
+			ufw delete allow "$port"/tcp
+		elif [[ $distro =~ "Debian" ]]; then
+			iptables -D INPUT -p tcp --dport "$port" --jump ACCEPT
+			iptables-save >/etc/iptables/rules.v4
+		fi
+	done <<< "$to_remove_ports"
+	# Stop and remove the service and files
 	systemctl stop v2ray
 	systemctl disable v2ray
 	rm /usr/local/bin/v2ray /etc/systemd/system/v2ray.service
@@ -306,11 +317,13 @@ function add_inbound_rule {
 	echo "Config added!"
 	# Restart the server and add the rule to firewall
 	systemctl restart v2ray
-	if [[ $distro =~ "Ubuntu" ]]; then
-		ufw allow "$port"/tcp
-	elif [[ $distro =~ "Debian" ]]; then
-		iptables -D INPUT -p tcp --dport "$port" --jump ACCEPT
-		iptables-save >/etc/iptables/rules.v4
+	if [[ "$listen_address" != "127.0.0.1" ]]; then
+		if [[ $distro =~ "Ubuntu" ]]; then
+			ufw allow "$port"/tcp
+		elif [[ $distro =~ "Debian" ]]; then
+			iptables -D INPUT -p tcp --dport "$port" --jump ACCEPT
+			iptables-save >/etc/iptables/rules.v4
+		fi
 	fi
 }
 
