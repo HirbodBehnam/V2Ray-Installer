@@ -176,6 +176,7 @@ function configure_shadowsocks_settings {
 
 # Adds and removes users from a user set of vmess or vless.
 # First argument must be the initial value of the config.
+# Second argument must be either vless or vmess.
 # The config result is returned in an variable called PROTOCOL_CONFIG
 function manage_vmess_vless_users {
 	local config=$1
@@ -212,6 +213,9 @@ function manage_vmess_vless_users {
 			;;
 		*)
 			PROTOCOL_CONFIG=$(jq -c '{clients: .}' <<< "$config")
+			if [[ "$2" == "vless" ]]; then
+				PROTOCOL_CONFIG=$(jq -c '. += {"decryption": "none"}' <<< "$PROTOCOL_CONFIG")
+			fi
 			break
 		esac
 	done
@@ -249,12 +253,11 @@ function add_inbound_rule {
 	case $protocol in
 	1)
 		protocol="vmess"
-		manage_vmess_vless_users "[]"
+		manage_vmess_vless_users "[]" "vmess"
 		;;
 	2)
 		protocol="vless"
-		manage_vmess_vless_users "[]"
-		PROTOCOL_CONFIG=$(jq -c '. += {"decryption": "none"}' <<< "$PROTOCOL_CONFIG")
+		manage_vmess_vless_users "[]" "vless"
 		;;
 	3)
 		protocol="shadowsocks"
@@ -348,6 +351,23 @@ function remove_inbound_rule {
 	systemctl restart v2ray
 }
 
+# This function will act as a user manager for vless/vmess inbounds
+function edit_v_config {
+	# Ask user to choose from vless/vmess configs
+	local option
+	read -r -p "Select an vless/vmess rule to remove by it's index: " -e option
+	# Check if it's vless/vmess
+	local protocol
+	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
+	if [[ "$protocol" != "vless" && "$protocol" != "vmess" ]]; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Selected inbound is not vless nor vmess"
+		exit 1
+	fi
+	# Get the users array
+	manage_vmess_vless_users "$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)" "$protocol"
+	jq --argjson protocol_config "$PROTOCOL_CONFIG" --arg index "$option" '.inbounds[$index | tonumber - 1] += {settings: $protocol_config}' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
+}
+
 # Shows a menu to edit user
 function main_menu {
 	local option
@@ -363,7 +383,7 @@ function main_menu {
 	read -r -p "Please enter an option: " option
 	case $option in
 	1) add_inbound_rule ;;
-	2) ;;
+	2) edit_v_config ;;
 	3) remove_inbound_rule ;;
 	4) uninstall_v2fly ;;
 	esac
