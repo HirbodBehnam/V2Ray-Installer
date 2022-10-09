@@ -208,7 +208,7 @@ function manage_vmess_vless_users {
 				echo "$i) $line"
 				i=$((i+1))
 			done
-			read -r -p "Select an ID by it's index to remove it: " -e option
+			read -r -p "Select an ID by its index to remove it: " -e option
 			config=$(jq -c --arg index "$option" 'del(.[$index | tonumber - 1])' <<< "$config")
 			;;
 		*)
@@ -219,6 +219,29 @@ function manage_vmess_vless_users {
 			break
 		esac
 	done
+}
+
+# Call this function with first argument as user arrays to
+# ask the user to choose one of the users. The uid of the user will be returned as
+# USER_ID varible.
+function choose_vless_vmess_user {
+	# Print users
+	local config=$1
+	local i=1
+	local configs option
+	configs=$(jq -r '.[] | .email + " (" + .id + ")"' <<< "$config")
+	echo "Here are the list of user ids for this inbound:"
+	while read -r user; do
+		echo "$i) $user"
+		i=$((i+1))
+	done <<< "$configs"
+	read -r -p "Select a user by it's index: " -e option
+	# Get the UID of the choosen user
+	USER_ID=$(jq -r --arg index "$option" '.[$index | tonumber - 1].id' <<< "$config")
+	if [[ "$USER_ID" == "" ]]; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Invalid index."
+		exit 1
+	fi
 }
 
 # Adds an inbound rule to config file
@@ -289,7 +312,7 @@ function add_inbound_rule {
 	echo "	4) Websocket + TLS"
 	echo "	5) gRPC"
 	#echo "	6) mKCP" Later!
-	read -r -p "Select your trasport: " -e network
+	read -r -p "Select your transport: " -e network
 	case $network in
 	1) network='{"network":"tcp","security":"none"}' ;;
 	2)
@@ -335,7 +358,7 @@ function add_inbound_rule {
 # Removes one inbound rule from configs
 function remove_inbound_rule {
 	local option port
-	read -r -p "Select an inbound rule to remove by it's index: " -e option
+	read -r -p "Select an inbound rule to remove by its index: " -e option
 	# Remove the firewall rule
 	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port')
 	if [[ "$port" != "null" ]]; then
@@ -355,7 +378,7 @@ function remove_inbound_rule {
 function edit_v_config {
 	# Ask user to choose from vless/vmess configs
 	local option
-	read -r -p "Select an vless/vmess rule to remove by it's index: " -e option
+	read -r -p "Select a vless/vmess rule to remove by its index: " -e option
 	# Check if it's vless/vmess
 	local protocol
 	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
@@ -368,6 +391,46 @@ function edit_v_config {
 	jq --argjson protocol_config "$PROTOCOL_CONFIG" --arg index "$option" '.inbounds[$index | tonumber - 1] += {settings: $protocol_config}' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
 }
 
+# Generates a client config for an inbound and user
+function generate_client_config {
+	local client_base='{"log":{"loglevel":"info"},"inbounds":[{"listen":"127.0.0.1","port":"10808","protocol":"socks","settings":{"udp":true}},{"listen":"127.0.0.1","port":"10809","protocol":"http"}]}'
+	local outbound_rule outbound_settings
+	# Get IP of server
+	local public_ip curl_exit_status
+	public_ip="$(curl https://api.ipify.org -sS)"
+	curl_exit_status=$?
+	[ $curl_exit_status -ne 0 ] && public_ip="YOUR_IP"
+	# Get the rule
+	local option
+	read -r -p "Select a rule to generate the config of it by its index: " -e option
+	# Based on protocol create the config file
+	local protocol port
+	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
+	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port' /usr/local/etc/v2ray/config.json)
+	case $protocol in
+	"vless"|"vmess")
+		choose_vless_vmess_user "$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)"
+		outbound_settings=$(jq -n --arg address "$public_ip" --arg port "$port" --arg id "$USER_ID" '{address: $address, port: ($port | tonumber), users: [{id: $id}]}')
+		if [[ "$protocol" == "vless" ]]; then
+			outbound_settings=$(jq '.users[0] += {encryption: "none"}' <<< "$outbound_settings")
+		fi
+		;;
+	*)
+		echo "$(tput setaf 1)Error:$(tput sgr 0) This protocol is not currently supported by script..."
+		exit 1
+		;;
+	esac
+	# We put the transport settings just like the one in server.
+	local transport_settings
+	transport_settings=$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].streamSettings' /usr/local/etc/v2ray/config.json)
+	outbound_rule=$(jq -n --arg protocol "$protocol" --argjson settings "$outbound_settings" --argjson transport "$transport_settings" '{protocol: $protocol, settings: $settings, streamSettings: $transport}')
+	# Save the file
+	local filename
+	read -r -p "Enter a filename to save the client file: " -e filename
+	# At last, we compile the result json and save it to file
+	jq -c --argjson outbound "$outbound_rule" '.outbounds = [$outbound]' <<< "$client_base" > "$filename"
+}
+
 # Shows a menu to edit user
 function main_menu {
 	local option
@@ -377,15 +440,17 @@ function main_menu {
 	echo "What do you want to do?"
 	echo "	1) Add rule"
 	echo "	2) Edit VMess or VLess accounts"
-	echo "	3) Delete rule"
-	echo "	4) Uninstall v2fly"
+	echo "	3) Generate client config"
+	echo "	4) Delete rule"
+	echo "	5) Uninstall v2fly"
 	echo "	*) Exit"
 	read -r -p "Please enter an option: " option
 	case $option in
 	1) add_inbound_rule ;;
 	2) edit_v_config ;;
-	3) remove_inbound_rule ;;
-	4) uninstall_v2fly ;;
+	3) generate_client_config ;;
+	4) remove_inbound_rule ;;
+	5) uninstall_v2fly ;;
 	esac
 }
 
@@ -398,7 +463,7 @@ fi
 
 # Open main menu
 clear
-echo "V2Fly insatller script by Hirbod Behnam"
+echo "V2Fly installer script by Hirbod Behnam"
 echo "Source at https://github.com/HirbodBehnam/V2Ray-Installer"
 echo
 main_menu
