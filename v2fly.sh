@@ -100,7 +100,7 @@ function get_tls_config {
 		;;
 	esac
 	# Generate the config
-	TLS_SETTINGS=$(jq -c --arg servername "$servername" '{serverName: $servername, alpn: ["h2","http/1.1"], certificates: [.]}' <<< "$certificate")
+	TLS_SETTINGS=$(jq -c --arg servername "$servername" '{serverName: $servername, certificates: [.]}' <<< "$certificate")
 }
 
 # Checks if the port is in use in inbound rules of v2ray.
@@ -112,9 +112,16 @@ function is_port_in_use_inbound {
 
 # This function will print all inbound configs of installed v2ray server
 function print_inbound {
+	# Check zero length
+	if jq -e '.inbounds | length == 0' /usr/local/etc/v2ray/config.json > /dev/null; then
+		echo "No configured inbounds!"
+		echo
+		return
+	fi
+	# Print
 	echo "Currently configured inbounds:"
 	local inbounds
-	inbounds=$(jq -c .inbounds[] /usr/local/etc/v2ray/config.json)
+	inbounds=$(jq -c '.inbounds[]' /usr/local/etc/v2ray/config.json)
 	local i=1
 	# Loop over all inbounds
 	while read -r inbound; do
@@ -329,7 +336,7 @@ function add_inbound_rule {
 		network="{\"network\":\"ws\",\"security\":\"tls\",\"wsSettings\":{\"path\":\"$ws_path\"},\"tlsSettings\":$TLS_SETTINGS}"
 		;;
 	5)
-		get_tls_certs
+		get_tls_config
 		read -r -p "Select a service name for gRPC (do not use special characters): " -e grpc_service_name
 		network="{\"network\":\"gun\",\"security\":\"tls\",\"grpcSettings\":{\"serviceName\":\"$grpc_service_name\"},\"tlsSettings\":$TLS_SETTINGS}"
 		;;
@@ -360,7 +367,7 @@ function remove_inbound_rule {
 	local option port
 	read -r -p "Select an inbound rule to remove by its index: " -e option
 	# Remove the firewall rule
-	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port')
+	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port' /usr/local/etc/v2ray/config.json)
 	if [[ "$port" != "null" ]]; then
 		if [[ $distro =~ "Ubuntu" ]]; then
 			ufw delete allow "$port"/tcp
@@ -409,11 +416,12 @@ function generate_client_config {
 	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port' /usr/local/etc/v2ray/config.json)
 	case $protocol in
 	"vless"|"vmess")
-		choose_vless_vmess_user "$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)"
+		choose_vless_vmess_user "$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)"
 		outbound_settings=$(jq -n --arg address "$public_ip" --arg port "$port" --arg id "$USER_ID" '{address: $address, port: ($port | tonumber), users: [{id: $id}]}')
 		if [[ "$protocol" == "vless" ]]; then
 			outbound_settings=$(jq '.users[0] += {encryption: "none"}' <<< "$outbound_settings")
 		fi
+		outbound_settings=$(jq -c '{vnext: [.]}' <<< "$outbound_settings")
 		;;
 	*)
 		echo "$(tput setaf 1)Error:$(tput sgr 0) This protocol is not currently supported by script..."
@@ -428,7 +436,8 @@ function generate_client_config {
 	local filename
 	read -r -p "Enter a filename to save the client file: " -e filename
 	# At last, we compile the result json and save it to file
-	jq -c --argjson outbound "$outbound_rule" '.outbounds = [$outbound]' <<< "$client_base" > "$filename"
+	jq --argjson outbound "$outbound_rule" '.outbounds = [$outbound]' <<< "$client_base" > "$filename"
+	chmod 666 "$filename"
 }
 
 # Shows a menu to edit user
