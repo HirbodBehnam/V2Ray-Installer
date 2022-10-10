@@ -211,10 +211,12 @@ function manage_vmess_vless_users {
 			;;
 		4)
 			local i=1
-			for line in $(jq -r '.[] | .email + " (" + .id + ")"' <<< "$config"); do
+			local users
+			users=$(jq -r '.[] | .email + " (" + .id + ")"' <<< "$config")
+			while read -r user; do
 				echo "$i) $line"
 				i=$((i+1))
-			done
+			done <<< "$users"
 			read -r -p "Select an ID by its index to remove it: " -e option
 			config=$(jq -c --arg index "$option" 'del(.[$index | tonumber - 1])' <<< "$config")
 			;;
@@ -385,7 +387,7 @@ function remove_inbound_rule {
 function edit_v_config {
 	# Ask user to choose from vless/vmess configs
 	local option
-	read -r -p "Select a vless/vmess rule to remove by its index: " -e option
+	read -r -p "Select a vless/vmess rule to edit it by its index: " -e option
 	# Check if it's vless/vmess
 	local protocol
 	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
@@ -396,6 +398,7 @@ function edit_v_config {
 	# Get the users array
 	manage_vmess_vless_users "$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)" "$protocol"
 	jq --argjson protocol_config "$PROTOCOL_CONFIG" --arg index "$option" '.inbounds[$index | tonumber - 1] += {settings: $protocol_config}' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
+	systemctl restart v2ray
 }
 
 # Generates a client config for an inbound and user
