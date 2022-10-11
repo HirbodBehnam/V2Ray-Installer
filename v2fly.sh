@@ -44,7 +44,7 @@ function install_v2fly {
 	unzip v2fly.zip v2ray -d /usr/local/bin/
 	# Create the config file
 	mkdir /usr/local/etc/v2ray
-	echo '{"log":{"loglevel":"warning"},"inbounds":[],"outbounds":[{"protocol":"freedom"}]}' > /usr/local/etc/v2ray/config.json
+	echo '{"log":{"loglevel":"warning","access":"none"},"inbounds":[],"outbounds":[{"protocol":"freedom"}]}' > /usr/local/etc/v2ray/config.json
 	# Create the config file but dont start it
 	unzip -p v2fly.zip systemd/system/v2ray.service > /etc/systemd/system/v2ray.service
 	systemctl daemon-reload
@@ -202,19 +202,19 @@ function manage_vmess_vless_users {
 		2)
 			id=$(v2ray uuid)
 			read -r -p "Choose an email for this user. It could be an arbitrary email: " -e email
-			config=$(jq -c --arg id "$id" --arg email "$email" '.[. | length] |= . + {id: $id, email: $email}' <<< "$config")
+			config=$(jq -c --arg id "$id" --arg email "$email" '. += [{id: $id, email: $email}]' <<< "$config")
 			;;
 		3)
 			read -r -p "Enter your uuid: " -e id
 			read -r -p "Choose an email for this user. It could be an arbitrary email: " -e email
-			config=$(jq -c --arg id "$id" --arg email "$email" '.[. | length] |= . + {id: $id, email: $email}' <<< "$config")
+			config=$(jq -c --arg id "$id" --arg email "$email" '. += [{id: $id, email: $email}]' <<< "$config")
 			;;
 		4)
 			local i=1
 			local users
 			users=$(jq -r '.[] | .email + " (" + .id + ")"' <<< "$config")
 			while read -r user; do
-				echo "$i) $line"
+				echo "$i) $user"
 				i=$((i+1))
 			done <<< "$users"
 			read -r -p "Select an ID by its index to remove it: " -e option
@@ -225,6 +225,51 @@ function manage_vmess_vless_users {
 			if [[ "$2" == "vless" ]]; then
 				PROTOCOL_CONFIG=$(jq -c '. += {"decryption": "none"}' <<< "$PROTOCOL_CONFIG")
 			fi
+			break
+		esac
+	done
+}
+
+# Adds and removes users from a user set of trojan.
+# First argument must be the initial value of the config.
+# The config result is returned in an variable called PROTOCOL_CONFIG
+function manage_trojan_users {
+	local config=$1
+	local option password email
+	while true; do
+		echo "	1) View clients"
+		echo "	2) Add random password to config"
+		echo "	3) Add custom password to config"
+		echo "	4) Delete password from config"
+		echo "	*) Back"
+		read -r -p "What do you want to do? (select by number) " -e option
+		case $option in
+		1)
+			jq -r '.[] | .email + " (" + .password + ")"' <<< "$config"
+			;;
+		2)
+			password=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 16 | head -n 1)
+			read -r -p "Choose an email for this user. It could be an arbitrary email: " -e email
+			config=$(jq -c --arg password "$password" --arg email "$email" '. += [{password: $password, email: $email}]' <<< "$config")
+			;;
+		3)
+			read -r -p "Enter your password: " -e password
+			read -r -p "Choose an email for this user. It could be an arbitrary email: " -e email
+			config=$(jq -c --arg password "$password" --arg email "$email" '. += [{password: $password, email: $email}]' <<< "$config")
+			;;
+		4)
+			local i=1
+			local users
+			users=$(jq -r '.[] | .email + " (" + .password + ")"' <<< "$config")
+			while read -r user; do
+				echo "$i) $user"
+				i=$((i+1))
+			done <<< "$users"
+			read -r -p "Select an password by its index to remove it: " -e option
+			config=$(jq -c --arg index "$option" 'del(.[$index | tonumber - 1])' <<< "$config")
+			;;
+		*)
+			PROTOCOL_CONFIG=$(jq -c '{clients: .}' <<< "$config")
 			break
 		esac
 	done
@@ -248,6 +293,29 @@ function choose_vless_vmess_user {
 	# Get the UID of the choosen user
 	USER_ID=$(jq -r --arg index "$option" '.[$index | tonumber - 1].id' <<< "$config")
 	if [[ "$USER_ID" == "" ]]; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Invalid index."
+		exit 1
+	fi
+}
+
+# Call this function with first argument as user arrays to
+# ask the user to choose one of the users. The uid of the user will be returned as
+# PASSWORD varible.
+function choose_torjan_user {
+	# Print users
+	local config=$1
+	local i=1
+	local configs option
+	configs=$(jq -r '.[] | .email + " (" + .password + ")"' <<< "$config")
+	echo "Here are the list of passwords for this config:"
+	while read -r user; do
+		echo "$i) $user"
+		i=$((i+1))
+	done <<< "$configs"
+	read -r -p "Select a user by it's index: " -e option
+	# Get the UID of the choosen user
+	PASSWORD=$(jq -r --arg index "$option" '.[$index | tonumber - 1].password' <<< "$config")
+	if [[ "$PASSWORD" == "" ]]; then
 		echo "$(tput setaf 1)Error:$(tput sgr 0) Invalid index."
 		exit 1
 	fi
@@ -281,6 +349,7 @@ function add_inbound_rule {
 	echo "	2) VLESS"
 	echo "	3) Shadowsocks"
 	echo "	4) SOCKS"
+	echo "	5) Trojan"
 	read -r -p "Select your protocol: " -e protocol
 	case $protocol in
 	1)
@@ -307,6 +376,10 @@ function add_inbound_rule {
 		else
 			PROTOCOL_CONFIG='{"auth":"noauth"}'
 		fi
+		;;
+	5)
+		protocol="trojan"
+		manage_trojan_users "[]"
 		;;
 	*)
 		echo "$(tput setaf 1)Error:$(tput sgr 0) Invalid option"
@@ -383,20 +456,32 @@ function remove_inbound_rule {
 	systemctl restart v2ray
 }
 
-# This function will act as a user manager for vless/vmess inbounds
-function edit_v_config {
+# This function will act as a user manager for vless/vmess/torjan inbounds
+function edit_config {
 	# Ask user to choose from vless/vmess configs
 	local option
 	read -r -p "Select a vless/vmess rule to edit it by its index: " -e option
-	# Check if it's vless/vmess
-	local protocol
+	# Check if it's vless/vmess and open menu
+	local protocol clients
+	clients="$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)"
 	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
+	case $protocol in
+	"vless"|"vmess")
+		manage_vmess_vless_users "$clients" "$protocol"
+		;;
+	"trojan")
+		manage_trojan_users "$clients"
+		;;
+	*)
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Selected inbound is not vless nor vmess"
+		exit 1
+		;;
+	esac
 	if [[ "$protocol" != "vless" && "$protocol" != "vmess" ]]; then
 		echo "$(tput setaf 1)Error:$(tput sgr 0) Selected inbound is not vless nor vmess"
 		exit 1
 	fi
-	# Get the users array
-	manage_vmess_vless_users "$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)" "$protocol"
+	# Save
 	jq --argjson protocol_config "$PROTOCOL_CONFIG" --arg index "$option" '.inbounds[$index | tonumber - 1] += {settings: $protocol_config}' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
 	systemctl restart v2ray
 }
@@ -414,17 +499,22 @@ function generate_client_config {
 	local option
 	read -r -p "Select a rule to generate the config of it by its index: " -e option
 	# Based on protocol create the config file
-	local protocol port
+	local protocol port clients
 	protocol=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].protocol' /usr/local/etc/v2ray/config.json)
 	port=$(jq -r --arg index "$option" '.inbounds[$index | tonumber - 1].port' /usr/local/etc/v2ray/config.json)
+	clients=$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)
 	case $protocol in
 	"vless"|"vmess")
-		choose_vless_vmess_user "$(jq -c --arg index "$option" '.inbounds[$index | tonumber - 1].settings.clients' /usr/local/etc/v2ray/config.json)"
+		choose_vless_vmess_user "$clients"
 		outbound_settings=$(jq -n --arg address "$public_ip" --arg port "$port" --arg id "$USER_ID" '{address: $address, port: ($port | tonumber), users: [{id: $id}]}')
 		if [[ "$protocol" == "vless" ]]; then
 			outbound_settings=$(jq '.users[0] += {encryption: "none"}' <<< "$outbound_settings")
 		fi
 		outbound_settings=$(jq -c '{vnext: [.]}' <<< "$outbound_settings")
+		;;
+	"trojan")
+		choose_torjan_user "$clients"
+		outbound_settings=$(jq -n --arg address "$public_ip" --arg port "$port" --arg password "$PASSWORD" '{servers: [{address: $address, port: ($port | tonumber), password: $password}]}')
 		;;
 	*)
 		echo "$(tput setaf 1)Error:$(tput sgr 0) This protocol is not currently supported by script..."
@@ -451,7 +541,7 @@ function main_menu {
 	# Main menu
 	echo "What do you want to do?"
 	echo "	1) Add rule"
-	echo "	2) Edit VMess or VLess accounts"
+	echo "	2) Edit VMess/VLess/Trojan accounts"
 	echo "	3) Generate client config"
 	echo "	4) Delete rule"
 	echo "	5) Uninstall v2fly"
