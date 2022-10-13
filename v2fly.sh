@@ -549,7 +549,7 @@ function main_menu {
 	read -r -p "Please enter an option: " option
 	case $option in
 	1) add_inbound_rule ;;
-	2) edit_v_config ;;
+	2) edit_config ;;
 	3) generate_client_config ;;
 	4) remove_inbound_rule ;;
 	5) uninstall_v2fly ;;
