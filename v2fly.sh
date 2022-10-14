@@ -477,10 +477,6 @@ function edit_config {
 		exit 1
 		;;
 	esac
-	if [[ "$protocol" != "vless" && "$protocol" != "vmess" ]]; then
-		echo "$(tput setaf 1)Error:$(tput sgr 0) Selected inbound is not vless nor vmess"
-		exit 1
-	fi
 	# Save
 	jq --argjson protocol_config "$PROTOCOL_CONFIG" --arg index "$option" '.inbounds[$index | tonumber - 1] += {settings: $protocol_config}' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
 	systemctl restart v2ray
