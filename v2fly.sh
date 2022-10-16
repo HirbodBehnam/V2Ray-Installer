@@ -387,13 +387,14 @@ function add_inbound_rule {
 		;;
 	esac
 	# Get the transport
-	local network ws_path grpc_service_name
+	local network network_path grpc_service_name
 	echo "	1) Raw TCP"
 	echo "	2) TLS"
 	echo "	3) Websocket"
 	echo "	4) Websocket + TLS"
-	echo "	5) gRPC"
-	#echo "	6) mKCP" Later!
+	echo "	5) HTTP2"
+	echo "	6) HTTP2 + TLS"
+	echo "	7) gRPC"
 	read -r -p "Select your transport: " -e network
 	case $network in
 	1) network='{"network":"tcp","security":"none"}' ;;
@@ -402,15 +403,24 @@ function add_inbound_rule {
 		network="{\"network\":\"tcp\",\"security\":\"tls\",\"tlsSettings\":$TLS_SETTINGS}"
 		;;
 	3)
-		read -r -p "Select a path for websocket (do not use special characters execpt /): " -e -i '/' ws_path
-		network="{\"network\":\"ws\",\"security\":\"none\",\"wsSettings\":{\"path\":\"$ws_path\"}}"
+		read -r -p "Select a path for websocket (do not use special characters execpt /): " -e -i '/' network_path
+		network="{\"network\":\"ws\",\"security\":\"none\",\"wsSettings\":{\"path\":\"$network_path\"}}"
 		;;
 	4)
 		get_tls_config
-		read -r -p "Select a path for websocket (do not use special characters execpt /): " -e -i '/' ws_path
-		network="{\"network\":\"ws\",\"security\":\"tls\",\"wsSettings\":{\"path\":\"$ws_path\"},\"tlsSettings\":$TLS_SETTINGS}"
+		read -r -p "Select a path for websocket (do not use special characters execpt /): " -e -i '/' network_path
+		network="{\"network\":\"ws\",\"security\":\"tls\",\"wsSettings\":{\"path\":\"$network_path\"},\"tlsSettings\":$TLS_SETTINGS}"
 		;;
 	5)
+		read -r -p "Select a path for http (do not use special characters execpt /): " -e -i '/' network_path
+		network="{\"network\":\"h2\",\"security\":\"none\",\"httpSettings\":{\"path\":\"$network_path\"}}"
+		;;
+	6)
+		get_tls_config
+		read -r -p "Select a path for http (do not use special characters execpt /): " -e -i '/' network_path
+		network="{\"network\":\"h2\",\"security\":\"tls\",\"httpSettings\":{\"path\":\"$network_path\"},\"tlsSettings\":$TLS_SETTINGS}"
+		;;
+	7)
 		get_tls_config
 		read -r -p "Select a service name for gRPC (do not use special characters): " -e grpc_service_name
 		network="{\"network\":\"gun\",\"security\":\"tls\",\"grpcSettings\":{\"serviceName\":\"$grpc_service_name\"},\"tlsSettings\":$TLS_SETTINGS}"
