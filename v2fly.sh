@@ -44,7 +44,7 @@ function install_v2fly {
 	unzip v2fly.zip v2ray -d /usr/local/bin/
 	# Create the config file
 	mkdir /usr/local/etc/v2ray
-	echo '{"log":{"loglevel":"warning","access":"none"},"inbounds":[],"outbounds":[{"protocol":"freedom"}],"stats":{},"policy":{"system":{"statsOutboundUplink":true,"statsOutboundDownlink":true}}}' > /usr/local/etc/v2ray/config.json
+	echo '{"log":{"loglevel":"warning","access":"none"},"inbounds":[],"outbounds":[{"protocol":"freedom"}],"stats":{},"policy":{"levels":{"0":{"statsUserUplink":true,"statsUserDownlink":true}},"system":{"statsOutboundUplink":true,"statsOutboundDownlink":true}},"api":{"tag":"api","services":["StatsService"]},"routing":{"rules":[{"inboundTag":["api"],"outboundTag":"api","type":"field"}],"domainStrategy":"AsIs"}}' > /usr/local/etc/v2ray/config.json
 	# Create the config file but dont start it
 	unzip -p v2fly.zip systemd/system/v2ray.service > /etc/systemd/system/v2ray.service
 	systemctl daemon-reload
