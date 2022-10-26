@@ -392,9 +392,10 @@ function add_inbound_rule {
 	echo "	2) TLS"
 	echo "	3) Websocket"
 	echo "	4) Websocket + TLS"
-	echo "	5) HTTP2"
+	echo "	5) HTTP2 cleartext"
 	echo "	6) HTTP2 + TLS"
-	echo "	7) gRPC"
+	echo "	7) gRPC cleartext"
+	echo "	8) gRPC + TLS"
 	read -r -p "Select your transport: " -e network
 	case $network in
 	1) network='{"network":"tcp","security":"none"}' ;;
@@ -421,6 +422,10 @@ function add_inbound_rule {
 		network="{\"network\":\"h2\",\"security\":\"tls\",\"httpSettings\":{\"path\":\"$network_path\"},\"tlsSettings\":$TLS_SETTINGS}"
 		;;
 	7)
+		read -r -p "Select a service name for gRPC (do not use special characters): " -e grpc_service_name
+		network="{\"network\":\"gun\",\"security\":\"none\",\"grpcSettings\":{\"serviceName\":\"$grpc_service_name\"}}"
+		;;
+	8)
 		get_tls_config
 		read -r -p "Select a service name for gRPC (do not use special characters): " -e grpc_service_name
 		network="{\"network\":\"gun\",\"security\":\"tls\",\"grpcSettings\":{\"serviceName\":\"$grpc_service_name\"},\"tlsSettings\":$TLS_SETTINGS}"
