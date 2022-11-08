@@ -1,9 +1,9 @@
 # V2Ray Installer
-A simple script to install v2fly on Ubuntu or Debian servers.
+A simple script to install v2fly or xray on Ubuntu or Debian servers.
 
 ## Features
 
-* Automatically install service for v2fly
+* Automatically install service for v2fly or xray
 * Support for VMess, VLess, Shadowsocks, Socks5 as protocols
 * Support for TCP, TLS, websocket, gRPC as transports
 * User management for VMess and VLess
@@ -13,7 +13,7 @@ A simple script to install v2fly on Ubuntu or Debian servers.
 
 ## Drawbacks
 
-* This script cannot configure reverse proxies like Nginx or Caddy to work with v2fly. You need to configure them yourself.
+* This script cannot configure reverse proxies like Nginx or Caddy to work with v2ray. You need to configure them yourself.
 * This script will not install firewall; But it will use it if it's installed. For Debian it uses iptables and for Ubuntu it uses ufw.
 
 ## Install
@@ -21,9 +21,9 @@ A simple script to install v2fly on Ubuntu or Debian servers.
 On your server run the following command:
 
 ```bash
-curl -o v2fly.sh https://raw.githubusercontent.com/HirbodBehnam/V2Ray-Installer/master/v2fly.sh && bash v2fly.sh
+curl -o v2ray.sh https://raw.githubusercontent.com/HirbodBehnam/V2Ray-Installer/master/v2ray.sh && bash v2ray.sh
 ```
-At first, it installs v2fly as service and then it shows you options to manage it.
+At first, it installs v2fly/xray as service and then it shows you options to manage it.
 
 ### Installed Service and Files
 
@@ -33,7 +33,7 @@ The config file can be freely edited. You can add protocol/transports which are 
 
 ### Installed v2ray Version
 
-Script always installs the latest [v2fly release](https://github.com/v2fly/v2ray-core/releases/latest) from GitHub.
+Script always installs the latest [v2fly release](https://github.com/v2fly/v2ray-core/releases/latest) or [Xray release](https://github.com/XTLS/Xray-core/releases/latest) from GitHub.
 
 
 ## Guides

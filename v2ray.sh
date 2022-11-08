@@ -5,13 +5,12 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 distro=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-# This function installs v2fly executables and creates an empty config
-function install_v2fly {
+# This function installs v2fly/xray executables and creates an empty config
+function install_v2ray {
 	# At first install some stuff needed for this script
 	apt update
 	apt -y install jq curl wget unzip moreutils
-	# Now download the latest v2fly executable
-	# For that we need to get user's architecture
+	# Get user's architecture
 	local arch
 	arch=$(uname -m)
 	case $arch in
@@ -37,24 +36,62 @@ function install_v2fly {
 		exit 1
 		;;
 	esac
+	# Ask for xray or v2fly
+	local xray_or_v2fly
+	echo "1) xray"
+	echo "2) v2fly"
+	read -r -p "What do you want to install? " -e -i 1 xray_or_v2fly
 	# Now download the executable
 	local url
-	url=$(wget -q -O- https://api.github.com/repos/v2fly/v2ray-core/releases/latest | jq --arg v "v2ray-linux-$arch.zip" -r '.assets[] | select(.name == $v) | .browser_download_url')
-	wget -O v2fly.zip "$url"
-	unzip v2fly.zip v2ray -d /usr/local/bin/
+	case $xray_or_v2fly in
+	1)
+		url=$(wget -q -O- https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq --arg v "Xray-linux-$arch.zip" -r '.assets[] | select(.name == $v) | .browser_download_url')
+		wget -O v2ray.zip "$url"
+		unzip v2ray.zip xray -d /usr/local/bin/
+		mv /usr/local/bin/xray /usr/local/bin/v2ray
+		xray_or_v2fly='xray'
+		;;
+	2)
+		url=$(wget -q -O- https://api.github.com/repos/v2fly/v2ray-core/releases/latest | jq --arg v "v2ray-linux-$arch.zip" -r '.assets[] | select(.name == $v) | .browser_download_url')
+		wget -O v2ray.zip "$url"
+		unzip v2ray.zip v2ray -d /usr/local/bin/
+		xray_or_v2fly='v2fly'
+		;;
+	*)
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Invalid option"
+		exit 1
+		;;
+	esac
 	# Create the config file
 	mkdir /usr/local/etc/v2ray
 	echo '{"log":{"loglevel":"warning","access":"none"},"inbounds":[],"outbounds":[{"protocol":"freedom"}],"stats":{},"policy":{"levels":{"0":{"statsUserUplink":true,"statsUserDownlink":true}},"system":{"statsOutboundUplink":true,"statsOutboundDownlink":true}},"api":{"tag":"api","services":["StatsService"]},"routing":{"rules":[{"inboundTag":["api"],"outboundTag":"api","type":"field"}],"domainStrategy":"AsIs"}}' > /usr/local/etc/v2ray/config.json
-	# Create the config file but dont start it
-	unzip -p v2fly.zip systemd/system/v2ray.service > /etc/systemd/system/v2ray.service
+	unzip v2ray.zip '*.dat' -d /usr/local/etc/v2ray
+	touch "/usr/local/etc/v2ray/.$xray_or_v2fly"
+	# Create the config file
+	echo "[Unit]
+Description=V2Ray Service
+After=network.target nss-lookup.target
+
+[Service]
+User=nobody
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/v2ray run -config /usr/local/etc/v2ray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+
+[Install]
+WantedBy=multi-user.target" > /etc/systemd/system/v2ray.service
 	systemctl daemon-reload
 	systemctl enable v2ray
+	systemctl start v2ray
 	# Cleanup
-	rm v2fly.zip
+	rm v2ray.zip
 }
 
 # Uninstalls v2ray and service
-function uninstall_v2fly {
+function uninstall_v2ray {
 	# Remove firewall rules
 	local to_remove_ports
 	to_remove_ports=$(jq '.inbounds[] | select(.listen != "127.0.0.1") | .port' /usr/local/etc/v2ray/config.json)
@@ -555,7 +592,7 @@ function main_menu {
 	echo "	2) Edit VMess/VLess/Trojan accounts"
 	echo "	3) Generate client config"
 	echo "	4) Delete rule"
-	echo "	5) Uninstall v2fly"
+	echo "	5) Uninstall v2ray"
 	echo "	*) Exit"
 	read -r -p "Please enter an option: " option
 	case $option in
@@ -563,7 +600,7 @@ function main_menu {
 	2) edit_config ;;
 	3) generate_client_config ;;
 	4) remove_inbound_rule ;;
-	5) uninstall_v2fly ;;
+	5) uninstall_v2ray ;;
 	esac
 }
 
@@ -571,12 +608,12 @@ function main_menu {
 if [ ! -f /usr/local/etc/v2ray/config.json ]; then
 	echo "It looks like that v2ray is not installed on your system."
 	read -n 1 -s -r -p "Press any key to install it or Ctrl+C to cancel..."
-	install_v2fly
+	install_v2ray
 fi
 
 # Open main menu
 clear
-echo "V2Fly installer script by Hirbod Behnam"
+echo "V2Fly/Xray installer script by Hirbod Behnam"
 echo "Source at https://github.com/HirbodBehnam/V2Ray-Installer"
 echo
 main_menu
