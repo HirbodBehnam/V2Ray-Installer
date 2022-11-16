@@ -144,7 +144,38 @@ function get_tls_config {
 # First argument must be the port number to check.
 # Returns 0 if it's in use otherwise 1
 function is_port_in_use_inbound {
-	jq --arg port "$1" -e '.inbounds[] | select(.port == $port) | length == 1' /usr/local/etc/v2ray/config.json > /dev/null
+	jq --arg port "$1" -e '.inbounds[] | select(.port == $port) | length > 0' /usr/local/etc/v2ray/config.json > /dev/null
+}
+
+# This function will check if api is enabled as a rule
+function is_api_enabled {
+	jq -e '.inbounds[] | select(.tag == "api") | length > 0' /usr/local/etc/v2ray/config.json > /dev/null
+}
+
+# This function will check if xray is installed. If true returns 0 otherwise (v2fly is installed)
+# returns non zero.
+function is_xray {
+	v2ray version | grep xray
+}
+
+# Get port will get a port from user.
+# It will also check if the port is valid and if another v2ray service is using it.
+function get_port {
+	local regex_number='^[0-9]+$'
+	read -r -p "Select a port to proxy listen on it: " -e PORT
+	if ! [[ $PORT =~ $regex_number ]]; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) The port is not a valid number"
+		exit 1
+	fi
+	if [ "$PORT" -gt 65535 ]; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Number must be less than 65536"
+		exit 1
+	fi
+	# Check if the port is in use by another service of v2ray
+	if is_port_in_use_inbound "$PORT"; then
+		echo "$(tput setaf 1)Error:$(tput sgr 0) Port already in use"
+		exit 1
+	fi
 }
 
 # This function will print all inbound configs of installed v2ray server
@@ -361,22 +392,8 @@ function choose_torjan_user {
 # Adds an inbound rule to config file
 function add_inbound_rule {
 	# At first get the port of user
-	local port
-	local regex_number='^[0-9]+$'
-	read -r -p "Select a port to proxy listen on it: " -e port
-	if ! [[ $port =~ $regex_number ]]; then
-		echo "$(tput setaf 1)Error:$(tput sgr 0) The port is not a valid number"
-		exit 1
-	fi
-	if [ "$port" -gt 65535 ]; then
-		echo "$(tput setaf 1)Error:$(tput sgr 0) Number must be less than 65536"
-		exit 1
-	fi
-	# Check if the port is in use by another service of v2ray
-	if is_port_in_use_inbound "$port"; then
-		echo "$(tput setaf 1)Error:$(tput sgr 0) Port already in use"
-		exit 1
-	fi
+	get_port
+	local port="$PORT"
 	# Listen address
 	local listen_address
 	read -r -p "On what interface you want to listen?: " -e -i '0.0.0.0' listen_address
@@ -581,6 +598,30 @@ function generate_client_config {
 	chmod 666 "$filename"
 }
 
+# This function will enable the api if it is not enabled 
+function manage_api {
+	# Enable API if needed
+	if ! is_api_enabled; then
+		echo "API is not enabled. To enable it, please select a loopback port:"
+		get_port
+		# Add the rule
+		new_rule=$(jq --argjson port "$PORT" '.port |= $port' <<< '{"listen":"127.0.0.1","protocol":"dokodemo-door","settings":{"address":"127.0.0.1"},"tag":"api"}')
+		jq --argjson api "$new_rule" '(.inbounds += [$api])' /usr/local/etc/v2ray/config.json | sponge /usr/local/etc/v2ray/config.json
+		systemctl restart v2ray
+	fi
+	# Get port
+	local port
+	port=$(jq '.inbounds[] | select(.tag == "api") | .port' /usr/local/etc/v2ray/config.json)
+	# Request the data
+	local method
+	if [[ is_xray ]]; then # xray is statusquery while v2fly is stats
+		method="statsquery"
+	else
+		method="stats"
+	fi
+	v2ray api "$method" --server="127.0.0.1:$port" | jq -r '.stat | (.[].value |= tonumber) | (.[].name |= split(">>>")) | group_by(.name[1]) | (.[] |= {download: (if .[0].name[3] == "downlink" then .[0].value else .[1].value end), upload: (if .[0].name[3] == "downlink" then .[1].value else .[0].value end), name: .[0].name[1], total: (.[0].value + .[1].value)}) | sort_by(.total) | reverse | .[] | .name + " ↓" + (.download / 1024 / 1024 | floor | tostring) + "MB ↑" + (.upload / 1024 / 1024 | floor | tostring) + "MB ↕" + (.total / 1024 / 1024 | floor | tostring) + "MB"' | column -t -s' '
+}
+
 # Shows a menu to edit user
 function main_menu {
 	local option
@@ -590,17 +631,19 @@ function main_menu {
 	echo "What do you want to do?"
 	echo "	1) Add rule"
 	echo "	2) Edit VMess/VLess/Trojan accounts"
-	echo "	3) Generate client config"
-	echo "	4) Delete rule"
-	echo "	5) Uninstall v2ray"
+	echo "	3) Show data usage of users"
+	echo "	4) Generate client config"
+	echo "	5) Delete rule"
+	echo "	6) Uninstall v2ray"
 	echo "	*) Exit"
 	read -r -p "Please enter an option: " option
 	case $option in
 	1) add_inbound_rule ;;
 	2) edit_config ;;
-	3) generate_client_config ;;
-	4) remove_inbound_rule ;;
-	5) uninstall_v2ray ;;
+	3) manage_api ;;
+	4) generate_client_config ;;
+	5) remove_inbound_rule ;;
+	6) uninstall_v2ray ;;
 	esac
 }
 
