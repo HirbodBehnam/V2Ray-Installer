@@ -9,7 +9,7 @@ distro=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 function install_v2ray {
 	# At first install some stuff needed for this script
 	apt update
-	apt -y install jq curl wget unzip moreutils
+	apt -y install jq curl wget unzip moreutils sqlite3
 	# Get user's architecture
 	local arch
 	arch=$(uname -m)
@@ -613,13 +613,31 @@ function manage_api {
 	local port
 	port=$(jq '.inbounds[] | select(.tag == "api") | .port' /usr/local/etc/v2ray/config.json)
 	# Request the data
-	local method
+	local method data
 	if [[ is_xray ]]; then # xray is statusquery while v2fly is stats
 		method="statsquery"
 	else
 		method="stats"
 	fi
-	v2ray api "$method" --server="127.0.0.1:$port" | jq -r '.stat | (.[].value |= tonumber) | (.[].name |= split(">>>")) | group_by(.name[1]) | (.[] |= {download: (if .[0].name[3] == "downlink" then .[0].value else .[1].value end), upload: (if .[0].name[3] == "downlink" then .[1].value else .[0].value end), name: .[0].name[1], total: (.[0].value + .[1].value)}) | sort_by(.total) | reverse | .[] | .name + " ↓" + (.download / 1024 / 1024 | floor | tostring) + "MB ↑" + (.upload / 1024 / 1024 | floor | tostring) + "MB ↕" + (.total / 1024 / 1024 | floor | tostring) + "MB"' | column -t -s' '
+	data=$(v2ray api "$method" --server="127.0.0.1:$port" | jq -c '.stat | (.[].value |= tonumber) | (.[].name |= split(">>>")) | group_by(.name[1]) | (.[] |= {download: (if .[0].name[3] == "downlink" then .[0].value else .[1].value end), upload: (if .[0].name[3] == "downlink" then .[1].value else .[0].value end), name: .[0].name[1]}) | .[]')
+	# Create the database
+	sqlite3 /usr/local/etc/v2ray/usage.db 'CREATE TABLE IF NOT EXISTS v2ray_traffic(
+		insert_time INTEGER NOT NULL,
+		username TEXT NOT NULL,
+		download INTEGER NOT NULL,
+		upload INTEGER NOT NULL,
+		PRIMARY KEY (insert_time, username)
+	)'
+	local query_buffer=""
+	while IFS=$"\n" read -r c; do
+		query_buffer+=$(printf '(%d, "%s", %d, %d),' "$(date +%s)" "$(jq -r .name <<< "$c")" "$(jq -r .download <<< "$c")" "$(jq -r .upload <<< "$c")") 
+	done <<< "$data"
+	# Save data in database
+	sqlite3 /usr/local/etc/v2ray/usage.db "$QUERY_BUFFER"
+	# Restart v2ray to reset data
+	systemctl restart v2ray
+	# Get data from database
+	sqlite3 -header -column /usr/local/etc/v2ray/usage.db 'SELECT username AS Email, "↓" || (SUM(download) / 1024 / 1024) || "MB" AS Download, "↑" || (SUM(upload) / 1024 / 1024) || "MB" AS Upload, "↕️" || (SUM(upload + download) / 1024 / 1024) || "MB" AS Total FROM v2ray_traffic GROUP BY username ORDER BY SUM(upload + download) DESC'
 }
 
 # Shows a menu to edit user
