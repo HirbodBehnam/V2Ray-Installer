@@ -637,7 +637,7 @@ function manage_api {
 	# Restart v2ray to reset data
 	systemctl restart v2ray
 	# Get data from database
-	sqlite3 -header -column /usr/local/etc/v2ray/usage.db 'SELECT username AS Email, "↓" || (SUM(download) / 1024 / 1024) || "MB" AS Download, "↑" || (SUM(upload) / 1024 / 1024) || "MB" AS Upload, "↕️" || (SUM(upload + download) / 1024 / 1024) || "MB" AS Total FROM v2ray_traffic GROUP BY username ORDER BY SUM(upload + download) DESC'
+	sqlite3 -header -column /usr/local/etc/v2ray/usage.db 'SELECT * FROM (SELECT username AS Email, "↓" || (SUM(download) / 1024 / 1024) || "MB" AS Download, "↑" || (SUM(upload) / 1024 / 1024) || "MB" AS Upload, "↕️" || (SUM(upload + download) / 1024 / 1024) || "MB" AS Total FROM v2ray_traffic GROUP BY username ORDER BY SUM(upload + download) DESC) UNION ALL SELECT "Total", "↓" || (SUM(download) / 1024 / 1024) || "MB", "↑" || (SUM(upload) / 1024 / 1024) || "MB", "↕️" || (SUM(upload + download) / 1024 / 1024) || "MB" FROM v2ray_traffic'
 }
 
 # Shows a menu to edit user
