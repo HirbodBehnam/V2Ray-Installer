@@ -628,12 +628,15 @@ function manage_api {
 		upload INTEGER NOT NULL,
 		PRIMARY KEY (insert_time, username)
 	)'
+	# Create the query
 	local query_buffer=""
 	while IFS=$"\n" read -r c; do
 		query_buffer+=$(printf '(%d, "%s", %d, %d),' "$(date +%s)" "$(jq -r .name <<< "$c")" "$(jq -r .download <<< "$c")" "$(jq -r .upload <<< "$c")") 
 	done <<< "$data"
+	query_buffer=${query_buffer::-1} # remove last ,
+	query_buffer="INSERT INTO v2ray_traffic VALUES $query_buffer"
 	# Save data in database
-	sqlite3 /usr/local/etc/v2ray/usage.db "$QUERY_BUFFER"
+	sqlite3 /usr/local/etc/v2ray/usage.db "$query_buffer"
 	# Restart v2ray to reset data
 	systemctl restart v2ray
 	# Get data from database
